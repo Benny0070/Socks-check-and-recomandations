@@ -16,13 +16,18 @@ st.markdown("""
     div[data-testid="stMetricValue"] { background-color: transparent !important; }
     div[data-testid="stMetricLabel"] { background-color: transparent !important; }
     .stMetric { background-color: transparent !important; border: none !important; }
-    /* Facem butonul de search sa arate bine langa input */
+    
+    /* CSS PENTRU ALINIERE PERFECTA BUTON CU INPUT */
+    div[data-testid="stHorizontalBlock"] {
+        align-items: center;
+    }
     div[data-testid="stHorizontalBlock"] > div:nth-child(2) button {
         border-radius: 5px;
+        border: 1px solid #4CAF50; /* Bordura verde sa se vada butonul */
         height: 100%;
-        line-height: 1.5;
-        padding-top: 0.5rem;
-        padding-bottom: 0.5rem;
+        padding-top: 0px;
+        padding-bottom: 0px;
+        min-height: 42px; /* Inaltimea standard a inputului */
     }
     </style>
     """, unsafe_allow_html=True)
@@ -37,12 +42,12 @@ if 'active_ticker' not in st.session_state:
 
 # --- FUNCȚIE SEARCH (CALLBACK) ---
 def execute_search():
-    # Luam valoarea din input
-    val = st.session_state.search_input
+    # Luam valoarea din inputul "search_term"
+    val = st.session_state.search_term
     if val:
         st.session_state.active_ticker = val.upper()
-        # Golim casuta dupa cautare (optional, sterge linia de jos daca nu vrei)
-        st.session_state.search_input = "" 
+        # Nu stergem textul ca sa vezi ce ai cautat, dar poti decomenta linia de jos:
+        # st.session_state.search_term = "" 
 
 def clean_text_for_pdf(text):
     text = str(text)
@@ -144,26 +149,25 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
         pdf.cell(0, 8, f"- {clean_text_for_pdf(r)}", ln=True)
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
-# --- SIDEBAR (DESIGN NOU: INPUT + BUTON LANGA) ---
-st.sidebar.header(f"🔎 Activ: {st.session_state.active_ticker}")
-st.sidebar.write("Caută companie:")
+# --- SIDEBAR (DESIGN: SEARCH BAR + BUTON) ---
+st.sidebar.title(f"🔍 {st.session_state.active_ticker}")
+st.sidebar.caption("Căutare Rapidă")
 
-# AICI ESTE SCHIMBAREA MAJORĂ: COLUMNS
-# Facem doua coloane: una lata pentru text (70%), una ingusta pentru buton (30%)
+# AICI E CHEIA: COLOANE (70% text, 30% buton)
 col_input, col_btn = st.sidebar.columns([0.7, 0.3])
 
 with col_input:
-    # label_visibility="collapsed" ascunde eticheta de deasupra ca sa se alinieze frumos
-    st.text_input("Caută", key="search_input", placeholder="ex: PLTR", label_visibility="collapsed")
+    # label_visibility="collapsed" ascunde eticheta ca sa nu ocupe spatiu
+    st.text_input("Simbol", key="search_term", placeholder="TSLA", label_visibility="collapsed")
 
 with col_btn:
-    # on_click=execute_search face toata magia
+    # Butonul executa cautarea cand e apasat
     st.button("Go", on_click=execute_search, type="primary")
 
 st.sidebar.markdown("---")
 
 # Buton Favorite
-if st.sidebar.button("➕ Adaugă la Favorite"):
+if st.sidebar.button("➕ Salvează la Favorite"):
     ticker_to_add = st.session_state.active_ticker
     if ticker_to_add not in st.session_state.favorites:
         try:
@@ -181,14 +185,14 @@ if st.session_state.favorites:
         full_n = st.session_state.favorite_names.get(fav, fav)
         
         c1, c2 = st.sidebar.columns([4, 1])
-        # Callbacks pt viteza
+        # Callback-uri pentru lista de favorite
         def set_fav(f=fav): st.session_state.active_ticker = f
         def del_fav(f=fav): st.session_state.favorites.remove(f)
 
         c1.button(f"{fav}", key=f"btn_{fav}", on_click=set_fav, help=full_n)
         c2.button("X", key=f"del_{fav}", on_click=del_fav)
 else:
-    st.sidebar.info("Gol.")
+    st.sidebar.info("Nicio companie salvată.")
 
 # --- MAIN APP ---
 temp_stock = yf.Ticker(st.session_state.active_ticker)
