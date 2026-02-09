@@ -29,15 +29,21 @@ if 'favorite_names' not in st.session_state:
     st.session_state.favorite_names = {} 
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "NVDA"
+# --- FUNCȚIA NOUĂ (O PUI IMEDIAT DEDESUBT) ---
+def update_search():
+    # Această funcție se execută când dai ENTER
+    val = st.session_state.search_input
+    if val:
+        st.session_state.active_ticker = val.upper()
+        st.session_state.search_input = "" # Golim căsuța după enter
 
-# --- FUNCȚIA DE SEARCH (SOLUȚIA PENTRU ENTER) ---
-def update_ticker_from_search():
-    # Această funcție se execută DOAR când dai Enter
-    cautare = st.session_state.search_widget_input
-    if cautare:
-        st.session_state.active_ticker = cautare.upper()
-        # Opțional: Putem goli căsuța după search ca să arate pro
-        st.session_state.search_widget_input = ""
+# --- ÎNLOCUIEȘTE LINIA VECHE DE INPUT CU ASTA ---
+st.sidebar.text_input(
+    "Caută Simbol și dă ENTER:",
+    key="search_input",        # Cheia asta leagă inputul de funcția de sus
+    on_change=update_search,   # Asta activează funcția când apeși ENTER
+    placeholder="ex: PLTR"
+)
 
 # --- 2. FUNCȚII UTILITARE ---
 
