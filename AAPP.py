@@ -5,6 +5,8 @@ import numpy as np
 from fpdf import FPDF
 import base64
 from datetime import datetime
+import json
+import os
 
 # --- 1. CONFIGURARE PAGINĂ ---
 st.set_page_config(page_title="PRIME Terminal", page_icon="🛡️", layout="wide")
@@ -23,15 +25,35 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- STATE ---
-if 'favorites' not in st.session_state: st.session_state.favorites = [] 
-if 'favorite_names' not in st.session_state: st.session_state.favorite_names = {} 
-if 'active_ticker' not in st.session_state: st.session_state.active_ticker = "NVDA"
+# --- SISTEM DE SALVARE PERMANENTA (JSON) ---
+DB_FILE = "prime_favorites.json"
+
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {"favorites": [], "names": {}}
+    return {"favorites": [], "names": {}}
+
+def save_db(fav_list, fav_names):
+    with open(DB_FILE, "w") as f:
+        json.dump({"favorites": fav_list, "names": fav_names}, f)
+
+# --- INIȚIALIZARE STATE (CU INCARCARE DIN FISIER) ---
+if 'db_loaded' not in st.session_state:
+    data = load_db()
+    st.session_state.favorites = data.get("favorites", [])
+    st.session_state.favorite_names = data.get("names", {})
+    st.session_state.db_loaded = True
+
+if 'active_ticker' not in st.session_state: 
+    st.session_state.active_ticker = "NVDA"
 
 # --- FUNCȚII UTILITARE ---
 def clean_text_for_pdf(text):
     text = str(text)
-    # Înlocuim emoji-urile cu text pentru că FPDF nu suportă emoji standard
     text = text.replace("🔴", "[RISC]").replace("🟢", "[BUN]").replace("🟡", "[NEUTRU]").replace("⚪", "-")
     return text.encode('latin-1', 'ignore').decode('latin-1')
 
@@ -113,7 +135,7 @@ def get_news_sentiment(stock):
     except:
         return "Indisponibil", []
 
-# --- GENERARE PDF EXTINS (MODIFICAT) ---
+# --- GENERARE PDF EXTINS ---
 def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk, info, rsi_val):
     pdf = FPDF()
     pdf.add_page()
@@ -144,7 +166,6 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     pdf.ln(2)
     pdf.set_font("Arial", '', 11)
     
-    # Interpretare RSI
     rsi_interp = "Supra-cumparat (Scump)" if rsi_val > 70 else "Supra-vandut (Ieftin)" if rsi_val < 30 else "Neutru"
     
     pdf.cell(95, 8, f"Volatilitate (Risc): {risk['vol']:.1f}%", border=1)
@@ -154,13 +175,12 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     pdf.cell(95, 8, f"High 52 Saptamani: {info.get('fiftyTwoWeekHigh', 'N/A')}", border=1)
     pdf.cell(95, 8, f"Low 52 Saptamani: {info.get('fiftyTwoWeekLow', 'N/A')}", border=1, ln=True)
 
-    # 4. DATE FUNDAMENTALE (VALUARE)
+    # 4. DATE FUNDAMENTALE
     pdf.ln(5)
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "3. INDICATORI FUNDAMENTALI", ln=True, fill=True)
     pdf.ln(2)
     
-    # Helper pentru extragere sigura si formatare
     def get_fmt(key, is_perc=False):
         val = info.get(key)
         if val is None: return "N/A"
@@ -168,7 +188,7 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
         return f"{val:.2f}"
 
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 8, "A. Evaluare (Este pretul corect?)", ln=True)
+    pdf.cell(0, 8, "A. Evaluare", ln=True)
     pdf.set_font("Arial", '', 11)
     
     pdf.cell(63, 8, f"P/E Ratio: {get_fmt('trailingPE')}", border=1)
@@ -176,23 +196,22 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     pdf.cell(63, 8, f"PEG Ratio: {get_fmt('pegRatio')}", border=1, ln=True)
     pdf.cell(63, 8, f"Price/Book: {get_fmt('priceToBook')}", border=1)
     pdf.cell(63, 8, f"Price/Sales: {get_fmt('priceToSalesTrailing12Months')}", border=1)
-    pdf.cell(63, 8, f"Enterprise Value: {info.get('enterpriseValue', 0)/1e9:.1f}B", border=1, ln=True)
+    pdf.cell(63, 8, f"EV: {info.get('enterpriseValue', 0)/1e9:.1f}B", border=1, ln=True)
 
     pdf.ln(2)
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 8, "B. Profitabilitate & Eficienta", ln=True)
+    pdf.cell(0, 8, "B. Profitabilitate", ln=True)
     pdf.set_font("Arial", '', 11)
     
     pdf.cell(63, 8, f"Marja Profit: {get_fmt('profitMargins', True)}", border=1)
     pdf.cell(63, 8, f"Marja Operationala: {get_fmt('operatingMargins', True)}", border=1)
-    pdf.cell(63, 8, f"ROE (Return on Equity): {get_fmt('returnOnEquity', True)}", border=1, ln=True)
+    pdf.cell(63, 8, f"ROE: {get_fmt('returnOnEquity', True)}", border=1, ln=True)
     pdf.cell(63, 8, f"Crestere Venituri: {get_fmt('revenueGrowth', True)}", border=1)
-    pdf.cell(63, 8, f"Crestere Profit: {get_fmt('earningsGrowth', True)}", border=1)
     pdf.cell(63, 8, f"Gross Margins: {get_fmt('grossMargins', True)}", border=1, ln=True)
 
     pdf.ln(2)
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 8, "C. Bilant (Sanatate Financiara)", ln=True)
+    pdf.cell(0, 8, "C. Bilant", ln=True)
     pdf.set_font("Arial", '', 11)
     
     cash = info.get('totalCash', 0)
@@ -201,9 +220,9 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     pdf.cell(95, 8, f"Total Cash: ${cash/1e9:.1f} B", border=1)
     pdf.cell(95, 8, f"Datorie Totala: ${debt/1e9:.1f} B", border=1, ln=True)
     pdf.cell(95, 8, f"Current Ratio: {get_fmt('currentRatio')}", border=1)
-    pdf.cell(95, 8, f"Cash per Share: {get_fmt('totalCashPerShare')}", border=1, ln=True)
+    pdf.cell(95, 8, f"Cash/Share: {get_fmt('totalCashPerShare')}", border=1, ln=True)
 
-    # 5. LISTA DE MOTIVE (SCORING)
+    # 5. MOTIVE
     pdf.ln(5)
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "4. DETALII SCORING", ln=True, fill=True)
@@ -214,8 +233,7 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     # Disclaimer
     pdf.ln(10)
     pdf.set_font("Arial", 'I', 8)
-    pdf.multi_cell(0, 5, "DISCLAIMER: Acest document este generat automat si nu reprezinta un sfat financiar. Informatiile sunt preluate din surse publice si pot contine erori. Investitiile la bursa implica riscuri.")
-
+    pdf.multi_cell(0, 5, "DISCLAIMER: Generat automat. Nu este sfat financiar.")
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
 # --- SIDEBAR ---
@@ -240,9 +258,15 @@ if st.sidebar.button("➕ Salvează la Favorite"):
         try:
             t_info = yf.Ticker(ticker_to_add).info
             long_name = t_info.get('longName', ticker_to_add)
+            
+            # Adaugam in Session State
             st.session_state.favorites.append(ticker_to_add)
             st.session_state.favorite_names[ticker_to_add] = long_name
-            st.sidebar.success("Adăugat!")
+            
+            # SALVAM PERMANENT IN FISIER
+            save_db(st.session_state.favorites, st.session_state.favorite_names)
+            
+            st.sidebar.success("Salvat Permanent!")
             st.rerun()
         except Exception: 
             st.sidebar.error("Eroare!")
@@ -252,8 +276,14 @@ if st.session_state.favorites:
     for fav in st.session_state.favorites:
         full_n = st.session_state.favorite_names.get(fav, fav)
         c1, c2 = st.sidebar.columns([4, 1])
+        
         def set_fav(f=fav): st.session_state.active_ticker = f
-        def del_fav(f=fav): st.session_state.favorites.remove(f)
+        
+        # Functie speciala pentru stergere si salvare
+        def del_fav(f=fav): 
+            st.session_state.favorites.remove(f)
+            save_db(st.session_state.favorites, st.session_state.favorite_names)
+
         c1.button(f"{fav}", key=f"btn_{fav}", on_click=set_fav, help=full_n)
         c2.button("X", key=f"del_{fav}", on_click=del_fav)
 else:
@@ -269,7 +299,6 @@ except:
 st.title(f"🛡️ {st.session_state.active_ticker}")
 st.caption(f"{temp_name}")
 
-# --- SLIDER MODIFICAT CU LISTA EXTINSA ---
 optiuni_ani = ['1mo', '3mo', '6mo', '1y', '2y', '3y', '4y', '5y', '6y', '7y', '8y', '9y', '10y', 'max']
 perioada = st.select_slider("Perioada:", options=optiuni_ani, value='1y')
 
@@ -302,7 +331,7 @@ if stock and not history.empty:
 
     with tab2: 
         st.subheader("RSI Momentum")
-        rsi_val = calculate_rsi(history['Close']).iloc[-1] # Calculam RSI aici sa il avem
+        rsi_val = calculate_rsi(history['Close']).iloc[-1]
         st.metric("RSI (14)", f"{rsi_val:.2f}")
         if rsi_val > 70: st.warning("Supra-cumparat (>70)")
         elif rsi_val < 30: st.success("Supra-vandut (<30)")
@@ -335,15 +364,12 @@ if stock and not history.empty:
             inv = st.number_input("Investitie ($)", 1000.0)
             st.success(f"Lunar: ${(inv*dy)/12:.2f}")
 
-    with tab6: # PDF EXTINS
-        st.write("Genereaza un raport complet cu toti indicatorii financiari.")
+    with tab6:
+        st.write("Genereaza un raport complet.")
         if st.button("📄 Descarca Raport Complet"):
             try:
-                # Recalculam RSI aici daca nu e disponibil
                 curr_rsi = calculate_rsi(history['Close']).iloc[-1]
                 risk_data = {'vol': volatility, 'dd': max_dd}
-                
-                # APELAM FUNCTIA EXTINSA CU TOATE DATELE
                 pdf_bytes = create_extended_pdf(
                     ticker=st.session_state.active_ticker,
                     full_name=temp_name,
@@ -352,10 +378,9 @@ if stock and not history.empty:
                     reasons=reasons,
                     verdict=verdict,
                     risk=risk_data,
-                    info=info,     # Trimitem tot dictionarul INFO
-                    rsi_val=curr_rsi # Trimitem si RSI
+                    info=info,
+                    rsi_val=curr_rsi
                 )
-                
                 b64 = base64.b64encode(pdf_bytes).decode()
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="Raport_Audit_{st.session_state.active_ticker}.pdf">📥 Descarca PDF</a>'
                 st.markdown(href, unsafe_allow_html=True)
