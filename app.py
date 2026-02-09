@@ -167,11 +167,21 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
 
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
-# --- SIDEBAR ---
+# --- SIDEBAR (MODIFICAT PENTRU CĂUTARE DIRECTĂ) ---
 st.sidebar.header("🔍 Control Panel")
 
-search_ticker = st.sidebar.text_input("Simbol (ex: TSLA)", value=st.session_state.active_ticker).upper()
+# 1. Input-ul care detectează Enter
+search_ticker = st.sidebar.text_input(
+    "Caută Companie (Scrie + Enter)", 
+    value=st.session_state.active_ticker
+).upper()
 
+# LOGICA MAGICĂ: Dacă textul s-a schimbat, actualizăm imediat
+if search_ticker != st.session_state.active_ticker:
+    st.session_state.active_ticker = search_ticker
+    st.rerun()
+
+# 2. Buton de Favorite (Opțional)
 if st.sidebar.button("➕ Adaugă la Favorite"):
     if search_ticker not in st.session_state.favorites:
         try:
@@ -179,7 +189,7 @@ if st.sidebar.button("➕ Adaugă la Favorite"):
             long_name = t_info.get('longName', search_ticker)
             st.session_state.favorites.append(search_ticker)
             st.session_state.favorite_names[search_ticker] = long_name
-            st.sidebar.success("Adăugat!")
+            st.sidebar.success(f"{search_ticker} Salvat!")
         except:
             st.sidebar.error("Simbol invalid!")
 
@@ -192,9 +202,11 @@ if st.session_state.favorites:
         disp_name = (full_n[:20] + '..') if len(full_n) > 20 else full_n
         
         c1, c2 = st.sidebar.columns([4, 1])
+        # Butonul de nume încarcă tickerul
         if c1.button(f"{fav} | {disp_name}", key=f"btn_{fav}"):
             st.session_state.active_ticker = fav
             st.rerun()
+        # Butonul X șterge
         if c2.button("X", key=f"del_{fav}"):
             st.session_state.favorites.remove(fav)
             st.rerun()
@@ -263,7 +275,7 @@ if stock and not history.empty:
         
         st.line_chart(history['Close'])
 
-    # TAB 2: TEHNIC & INSIDERS (MODIFICAT)
+    # TAB 2: TEHNIC & INSIDERS
     with tab2:
         st.subheader("1. Indicator RSI (Momentum)")
         rsi = calculate_rsi(history['Close'])
@@ -285,11 +297,8 @@ if stock and not history.empty:
         try:
             insiders = stock.insider_transactions
             if insiders is not None and not insiders.empty:
-                # 1. PROCESARE DATE PENTRU INTERPRETARE
-                # Luam ultimele 20 tranzactii
                 df_ins = insiders.head(20).copy()
                 
-                # Curatam si interpretam
                 analyze_data = []
                 sell_count = 0
                 buy_count = 0
@@ -300,7 +309,6 @@ if stock and not history.empty:
                     value = row.get('Value', 0)
                     date = row.get('Start Date', '')
                     
-                    # Logica de interpretare
                     if 'sale' in text or 'disposition' in text:
                         tip = "VÂNZARE 🔴"
                         sell_count += 1
@@ -308,7 +316,7 @@ if stock and not history.empty:
                         tip = "CUMPĂRARE 🟢"
                         buy_count += 1
                     elif 'grant' in text:
-                        tip = "BONUS (Grant) 🎁" # Neutru spre pozitiv
+                        tip = "BONUS (Grant) 🎁"
                     else:
                         tip = "Altele ⚪"
                         
@@ -320,7 +328,6 @@ if stock and not history.empty:
                         "Tip Tranzacție": tip
                     })
                 
-                # 2. AFISARE CONCLUZIE
                 c1, c2 = st.columns(2)
                 c1.metric("Nr. Vânzări Recente", f"{sell_count}", delta=-sell_count, delta_color="inverse")
                 c2.metric("Nr. Cumpărări Recente", f"{buy_count}", delta=buy_count)
@@ -332,10 +339,8 @@ if stock and not history.empty:
                 else:
                     st.info("ℹ️ Activitate echilibrată sau neutră (Bonusuri/Granturi).")
 
-                # 3. AFISARE TABEL CURAT
                 st.write("### Detalii Tranzacții:")
                 st.dataframe(pd.DataFrame(analyze_data))
-                
             else:
                 st.info("Nu există date recente despre tranzacțiile insiderilor.")
         except Exception as e:
