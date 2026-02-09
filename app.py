@@ -21,7 +21,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- INIȚIALIZARE STATE ---
-# Aici tinem minte variabilele ca sa nu se piarda la refresh
 if 'favorites' not in st.session_state:
     st.session_state.favorites = [] 
 if 'favorite_names' not in st.session_state:
@@ -29,57 +28,15 @@ if 'favorite_names' not in st.session_state:
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "NVDA"
 
-# --- SIDEBAR (METODA SIGURĂ PENTRU TELEFON) ---
-st.sidebar.header(f"🔎 Activ: {st.session_state.active_ticker}")
+# --- FUNCȚII UTILITARE ---
 
-st.sidebar.markdown("---")
-st.sidebar.write("**1. Căutare Manuală:**")
-
-# 1. CĂSUȚA DE TEXT (Nu face nimic singură, doar ține textul)
-ticker_input = st.sidebar.text_input("Scrie simbolul aici:", placeholder="ex: TSLA", key="input_manual")
-
-# 2. BUTONUL DE EXECUTIE (Asta e 'întârzierea' - execută doar când apeși)
-if st.sidebar.button("🔍 CAUTĂ ACUM", type="primary"):
-    if ticker_input:
-        st.session_state.active_ticker = ticker_input.upper()
-        st.rerun() # Refresh forțat
-    else:
-        st.sidebar.warning("Scrie ceva mai întâi!")
-
-st.sidebar.markdown("---")
-
-# Butonul de Favorite
-if st.sidebar.button("➕ Adaugă activ la Favorite"):
-    ticker_to_add = st.session_state.active_ticker
-    if ticker_to_add not in st.session_state.favorites:
-        try:
-            t_info = yf.Ticker(ticker_to_add).info
-            long_name = t_info.get('longName', ticker_to_add)
-            st.session_state.favorites.append(ticker_to_add)
-            st.session_state.favorite_names[ticker_to_add] = long_name
-            st.sidebar.success("Adăugat!")
-            st.rerun()
-        except:
-            st.sidebar.error("Eroare!")
-
-st.sidebar.subheader("Lista Mea")
-
-if st.session_state.favorites:
-    for fav in st.session_state.favorites:
-        full_n = st.session_state.favorite_names.get(fav, fav)
-        disp_name = (full_n[:18] + '..') if len(full_n) > 18 else full_n
-        
-        c1, c2 = st.sidebar.columns([4, 1])
-        if c1.button(f"{fav}", key=f"btn_{fav}", help=full_n):
-            st.session_state.active_ticker = fav
-            st.rerun()
-        if c2.button("X", key=f"del_{fav}"):
-            st.session_state.favorites.remove(fav)
-            st.rerun()
-else:
-    st.sidebar.info("Nicio companie salvată.")
-
-# --- 2. FUNCȚII UTILITARE ---
+# Aceasta este funcția MAGICĂ care se execută când apeși butonul
+def execute_search():
+    # Luăm valoarea direct din widget-ul cu cheia 'input_simbol'
+    valoare = st.session_state.input_simbol
+    if valoare:
+        st.session_state.active_ticker = valoare.upper()
+        # Nu e nevoie de rerun() aici, callback-ul face refresh automat
 
 def clean_text_for_pdf(text):
     text = str(text)
@@ -180,6 +137,48 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     for r in reasons:
         pdf.cell(0, 8, f"- {clean_text_for_pdf(r)}", ln=True)
     return pdf.output(dest='S').encode('latin-1', 'ignore')
+
+# --- SIDEBAR (METODA FINALĂ - CALLBACK) ---
+st.sidebar.header(f"🔎 Activ: {st.session_state.active_ticker}")
+st.sidebar.markdown("---")
+
+# 1. Input simplu (Fără Formulare, Fără on_change pe el)
+st.sidebar.text_input("Scrie simbolul:", key="input_simbol", placeholder="ex: TSLA")
+
+# 2. Buton care declanșează funcția execute_search
+# Asta forțează Streamlit să citească inputul chiar și pe telefon
+st.sidebar.button("🚀 CAUTĂ (Click Aici)", on_click=execute_search, type="primary")
+
+st.sidebar.markdown("---")
+
+# Butonul de Favorite
+if st.sidebar.button("➕ Adaugă activ la Favorite"):
+    ticker_to_add = st.session_state.active_ticker
+    if ticker_to_add not in st.session_state.favorites:
+        try:
+            t_info = yf.Ticker(ticker_to_add).info
+            long_name = t_info.get('longName', ticker_to_add)
+            st.session_state.favorites.append(ticker_to_add)
+            st.session_state.favorite_names[ticker_to_add] = long_name
+            st.sidebar.success("Adăugat!")
+        except:
+            st.sidebar.error("Eroare!")
+
+st.sidebar.subheader("Lista Mea")
+
+if st.session_state.favorites:
+    for fav in st.session_state.favorites:
+        full_n = st.session_state.favorite_names.get(fav, fav)
+        
+        c1, c2 = st.sidebar.columns([4, 1])
+        # Folosim callbacks și aici ca să fie rapid
+        def set_fav(f=fav): st.session_state.active_ticker = f
+        def del_fav(f=fav): st.session_state.favorites.remove(f)
+
+        c1.button(f"{fav}", key=f"btn_{fav}", on_click=set_fav, help=full_n)
+        c2.button("X", key=f"del_{fav}", on_click=del_fav)
+else:
+    st.sidebar.info("Nicio companie salvată.")
 
 # --- MAIN APP ---
 temp_stock = yf.Ticker(st.session_state.active_ticker)
