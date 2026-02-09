@@ -167,29 +167,32 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
 
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
-# --- SIDEBAR (MODIFICAT PENTRU CĂUTARE DIRECTĂ) ---
+# --- SIDEBAR (FIXAT PENTRU ENTER) ---
 st.sidebar.header("🔍 Control Panel")
 
-# 1. Input-ul care detectează Enter
-search_ticker = st.sidebar.text_input(
-    "Caută Companie (Scrie + Enter)", 
-    value=st.session_state.active_ticker
-).upper()
+# Funcția care se execută STRICT la Enter
+def update_ticker_on_enter():
+    st.session_state.active_ticker = st.session_state.widget_search_input.upper()
 
-# LOGICA MAGICĂ: Dacă textul s-a schimbat, actualizăm imediat
-if search_ticker != st.session_state.active_ticker:
-    st.session_state.active_ticker = search_ticker
-    st.rerun()
+# Input-ul cu Callback (on_change)
+st.sidebar.text_input(
+    "Caută Companie (Enter)",
+    value=st.session_state.active_ticker,
+    key="widget_search_input", # Cheie unică pentru acest widget
+    on_change=update_ticker_on_enter # Asta face magia
+)
 
-# 2. Buton de Favorite (Opțional)
+# Buton de Favorite
 if st.sidebar.button("➕ Adaugă la Favorite"):
-    if search_ticker not in st.session_state.favorites:
+    # Folosim direct active_ticker care e deja actualizat
+    curr = st.session_state.active_ticker
+    if curr not in st.session_state.favorites:
         try:
-            t_info = yf.Ticker(search_ticker).info
-            long_name = t_info.get('longName', search_ticker)
-            st.session_state.favorites.append(search_ticker)
-            st.session_state.favorite_names[search_ticker] = long_name
-            st.sidebar.success(f"{search_ticker} Salvat!")
+            t_info = yf.Ticker(curr).info
+            long_name = t_info.get('longName', curr)
+            st.session_state.favorites.append(curr)
+            st.session_state.favorite_names[curr] = long_name
+            st.sidebar.success(f"{curr} Salvat!")
         except:
             st.sidebar.error("Simbol invalid!")
 
@@ -202,11 +205,9 @@ if st.session_state.favorites:
         disp_name = (full_n[:20] + '..') if len(full_n) > 20 else full_n
         
         c1, c2 = st.sidebar.columns([4, 1])
-        # Butonul de nume încarcă tickerul
         if c1.button(f"{fav} | {disp_name}", key=f"btn_{fav}"):
             st.session_state.active_ticker = fav
             st.rerun()
-        # Butonul X șterge
         if c2.button("X", key=f"del_{fav}"):
             st.session_state.favorites.remove(fav)
             st.rerun()
