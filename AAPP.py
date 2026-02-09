@@ -191,7 +191,9 @@ except:
 st.title(f"🛡️ {st.session_state.active_ticker}")
 st.caption(f"{temp_name}")
 
-perioada = st.select_slider("Perioada:", options=['1mo', '3mo', '6mo', '1y', '2y', '5y'], value='1y')
+# --- LISTA MODIFICATA DE ANI ---
+optiuni = ['1mo', '3mo', '6mo', '1y', '2y', '3y', '4y', '5y', '6y', '7y', '8y', '9y', '10y', 'max']
+perioada = st.select_slider("Perioada:", options=optiuni, value='1y')
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Analiză", "📈 Tehnic", "📅 Calendar", "📰 Știri", "💰 Dividende", "📋 Audit", "⚔️ Vs"
