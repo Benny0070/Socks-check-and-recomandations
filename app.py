@@ -216,11 +216,11 @@ perioada = st.select_slider(
     value='1y'
 )
 
-# LISTA TAB-URI ACTUALIZATĂ
+# TABURILE
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Analiză", 
-    "📈 Tehnic & Insiders", # NOU
-    "📅 Calendar", # NOU
+    "📈 Tehnic & Insiders", 
+    "📅 Calendar", 
     "📰 Știri", 
     "💰 Dividende", 
     "📋 Audit PDF", 
@@ -248,15 +248,12 @@ if stock and not history.empty:
         verdict = "Neutru 🟡"
         style = "warning"
 
-    # TAB 1: ANALIZĂ (Cu Dividende incluse)
+    # TAB 1: ANALIZĂ
     with tab1:
-        # Acum sunt 4 coloane
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Preț Actual", f"${curr_price:.2f}")
         c2.metric("Scor PRIME", f"{score}/100")
         c3.metric("Risc (Volatilitate)", f"{volatility:.1f}%")
-        
-        # CERINTA 1: DIVIDENDE IN ANALIZA
         div_text = f"{div_yield*100:.2f}%" if div_yield > 0 else "0% (N/A)"
         c4.metric("Dividende", div_text)
         
@@ -266,11 +263,9 @@ if stock and not history.empty:
         
         st.line_chart(history['Close'])
 
-    # TAB 2: TEHNIC & INSIDERS (NOU - CERINTA 2)
+    # TAB 2: TEHNIC & INSIDERS (MODIFICAT)
     with tab2:
-        st.subheader("Indicatori Tehnici & Insider Trading")
-        
-        # 1. RSI
+        st.subheader("1. Indicator RSI (Momentum)")
         rsi = calculate_rsi(history['Close'])
         last_rsi = rsi.iloc[-1]
         
@@ -278,73 +273,109 @@ if stock and not history.empty:
         col_rsi1.metric("RSI (14 zile)", f"{last_rsi:.2f}")
         
         if last_rsi > 70:
-            col_rsi2.warning("🔥 SUPRA-CUMPĂRAT (>70). Prețul a crescut prea repede, posibilă corecție (scădere).")
+            col_rsi2.warning("🔥 SUPRA-CUMPĂRAT (>70). Prețul a crescut prea repede, posibilă scădere.")
         elif last_rsi < 30:
-            col_rsi2.success("💎 SUPRA-VÂNDUT (<30). Prețul a scăzut excesiv, posibil moment bun de cumpărare.")
+            col_rsi2.success("💎 SUPRA-VÂNDUT (<30). Prețul a scăzut excesiv, posibilă revenire.")
         else:
-            col_rsi2.info("⚖️ NEUTRU. Prețul se mișcă normal.")
+            col_rsi2.info("⚖️ NEUTRU. Preț stabil momentan.")
             
-        st.write("---")
+        st.markdown("---")
+        st.subheader("2. Activitate Insideri (Ce fac șefii companiei?)")
         
-        # 2. Insider Trading
-        st.write("### 🕴️ Activitate Insideri (Directori/CEO)")
-        st.caption("Arată dacă șefii companiei vând sau cumpără acțiuni.")
         try:
             insiders = stock.insider_transactions
             if insiders is not None and not insiders.empty:
-                # Curățăm puțin tabelul pentru afișare
-                insiders_clean = insiders[['Shares', 'Value', 'Text', 'Start Date']].head(10)
-                st.dataframe(insiders_clean)
+                # 1. PROCESARE DATE PENTRU INTERPRETARE
+                # Luam ultimele 20 tranzactii
+                df_ins = insiders.head(20).copy()
+                
+                # Curatam si interpretam
+                analyze_data = []
+                sell_count = 0
+                buy_count = 0
+                
+                for index, row in df_ins.iterrows():
+                    text = str(row.get('Text', '')).lower()
+                    shares = row.get('Shares', 0)
+                    value = row.get('Value', 0)
+                    date = row.get('Start Date', '')
+                    
+                    # Logica de interpretare
+                    if 'sale' in text or 'disposition' in text:
+                        tip = "VÂNZARE 🔴"
+                        sell_count += 1
+                    elif 'purchase' in text:
+                        tip = "CUMPĂRARE 🟢"
+                        buy_count += 1
+                    elif 'grant' in text:
+                        tip = "BONUS (Grant) 🎁" # Neutru spre pozitiv
+                    else:
+                        tip = "Altele ⚪"
+                        
+                    analyze_data.append({
+                        "Dată": date.strftime('%Y-%m-%d') if isinstance(date, datetime) else str(date),
+                        "Insider": row.get('Insider', 'N/A'),
+                        "Acțiuni": f"{shares:,}",
+                        "Valoare ($)": f"${value:,.0f}" if pd.notnull(value) else "N/A",
+                        "Tip Tranzacție": tip
+                    })
+                
+                # 2. AFISARE CONCLUZIE
+                c1, c2 = st.columns(2)
+                c1.metric("Nr. Vânzări Recente", f"{sell_count}", delta=-sell_count, delta_color="inverse")
+                c2.metric("Nr. Cumpărări Recente", f"{buy_count}", delta=buy_count)
+                
+                if sell_count > buy_count + 2:
+                    st.warning("⚠️ Atenție: Mai multe vânzări decât cumpărări în ultima perioadă.")
+                elif buy_count > sell_count:
+                    st.success("✅ Semnal Bun: Insiderii acumulează acțiuni.")
+                else:
+                    st.info("ℹ️ Activitate echilibrată sau neutră (Bonusuri/Granturi).")
+
+                # 3. AFISARE TABEL CURAT
+                st.write("### Detalii Tranzacții:")
+                st.dataframe(pd.DataFrame(analyze_data))
+                
             else:
                 st.info("Nu există date recente despre tranzacțiile insiderilor.")
-        except:
-            st.info("Datele despre Insideri nu sunt disponibile pentru acest simbol.")
+        except Exception as e:
+            st.info(f"Date indisponibile momentan: {e}")
 
-    # TAB 3: CALENDAR (NOU - CERINTA 3)
+    # TAB 3: CALENDAR
     with tab3:
         st.subheader("📅 Calendar Rezultate (Earnings)")
-        
         try:
             cal = stock.calendar
             if cal is not None and not cal.empty:
-                # De obicei, earnings date e cheia 'Earnings Date' sau 0
-                st.write("### Următoarea Raportare Financiară:")
+                st.write("### Următoarea Raportare:")
                 st.dataframe(cal)
-                
-                st.info("""
-                **Ce înseamnă asta?**
-                Aceasta este data când compania își anunță oficial profitul și pierderile trimestriale.
-                
-                ⚠️ **Atenție:** În această zi, prețul acțiunii poate fi extrem de volatil (poate crește sau scădea brusc cu 5-20% în câteva minute).
-                """)
+                st.info("⚠️ Volatilitate mare în ziua rezultatelor!")
             else:
-                st.write("Nu există o dată confirmată pentru următoarele rezultate.")
+                st.write("Nu există o dată confirmată.")
         except:
-            st.error("Nu s-au putut încărca datele din calendar.")
+            st.error("Eroare calendar.")
 
-    # TAB 4: ȘTIRI (VECHI)
+    # TAB 4: ȘTIRI
     with tab4:
         s, heads = get_news_sentiment(stock)
         st.write(f"Sentiment: **{s}**")
         for h in heads: st.markdown(f"- {h}")
 
-    # TAB 5: DIVIDENDE (VECHI + CALCULATOR)
+    # TAB 5: DIVIDENDE
     with tab5:
         dy = info.get('dividendYield', 0) or 0
         if dy > 0:
             st.metric("Randament Anual", f"{dy*100:.2f}%")
             invest = st.number_input("Suma Investită ($)", value=1000.0, step=50.0, format="%.2f")
-            
             anual = invest * dy
             lunar = anual / 12
-            st.success(f"Venit Lunar Estimat: **${lunar:.2f}**")
-            st.info(f"Venit Anual: ${anual:.2f}")
+            st.success(f"Venit Lunar: **${lunar:.2f}**")
         else:
             st.warning("Nu oferă dividende.")
 
-    # TAB 6: PDF (VECHI)
+    # TAB 6: PDF
     with tab6:
-        st.write("Generează raport detaliat.")
+        st.write("Generează raport.")
         if st.button("Descarcă Raport PRO"):
             try:
                 risk_data = {'vol': volatility, 'dd': max_dd}
@@ -358,7 +389,7 @@ if stock and not history.empty:
             except Exception as e:
                 st.error(f"Eroare: {e}")
 
-    # TAB 7: COMPARATIE (VECHI)
+    # TAB 7: COMPARATIE
     with tab7:
         st.header("Analiză Comparativă")
         if len(st.session_state.favorites) < 2:
@@ -366,9 +397,7 @@ if stock and not history.empty:
         else:
             sel = st.multiselect("Selectează:", st.session_state.favorites, default=st.session_state.favorites[:2])
             if sel:
-                st.write("Se calculează diferențele...")
                 df_comp = pd.DataFrame()
-                
                 for t in sel:
                     h = yf.Ticker(t).history(period="1y")['Close']
                     if not h.empty:
@@ -378,17 +407,11 @@ if stock and not history.empty:
                     st.line_chart(df_comp)
                     final_vals = df_comp.iloc[-1].sort_values(ascending=False)
                     best = final_vals.index[0]
-                    worst = final_vals.index[-1]
-                    diff = final_vals[best] - final_vals[worst]
-                    
-                    st.markdown(f"### 🏆 Liderul este **{best}**")
-                    st.markdown(f"Are un randament cu **{diff:.2f}%** mai mare decât {worst} în ultimul an.")
-                    
-                    st.write("#### Clasament Detaliat (1 An):")
+                    diff = final_vals[best] - final_vals[final_vals.index[-1]]
+                    st.markdown(f"### 🏆 {best} câștigă (+{diff:.2f}% peste ultimul loc).")
                     for tick, val in final_vals.items():
-                        c = "green" if val > 0 else "red"
-                        f_name = st.session_state.favorite_names.get(tick, tick)
-                        st.markdown(f"**{f_name} ({tick})**: :{c}[{val:.2f}%]")
+                         c = "green" if val > 0 else "red"
+                         st.markdown(f"**{tick}**: :{c}[{val:.2f}%]")
 
 else:
-    st.error("Date indisponibile pentru acest simbol.")
+    st.error("Date indisponibile.")
