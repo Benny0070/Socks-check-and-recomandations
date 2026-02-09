@@ -26,6 +26,7 @@ if 'favorites' not in st.session_state:
 def get_stock_data(ticker):
     try:
         stock = yf.Ticker(ticker)
+        # Cerem istoric pe 5 ani
         history = stock.history(period="5y")
         info = stock.info
         return stock, history, info
@@ -38,8 +39,10 @@ def calculate_prime_score(info, history):
     
     # 1. Trend (Media 200 zile)
     if not history.empty:
+        # Calculăm media mobilă simplă pe ultimele 200 de zile
         sma200 = history['Close'].rolling(window=200).mean().iloc[-1]
         current_price = history['Close'].iloc[-1]
+        
         if current_price > sma200:
             score += 20
             reasons.append("Preț peste media de 200 zile (Trend Ascendent)")
@@ -56,8 +59,10 @@ def calculate_prime_score(info, history):
         score += 20
         reasons.append(f"Creștere venituri: {rev_growth*100:.1f}%")
         
-    # 4. Evaluare (P/E Ratio) - ajustat
+    # 4. Evaluare (P/E Ratio)
     pe_ratio = info.get('trailingPE', 0)
+    if pe_ratio is None: pe_ratio = 0
+    
     if 0 < pe_ratio < 40:
         score += 20
         reasons.append(f"P/E Ratio rezonabil: {pe_ratio:.2f}")
@@ -68,6 +73,10 @@ def calculate_prime_score(info, history):
     # 5. Cash vs Datorii
     cash = info.get('totalCash', 0)
     debt = info.get('totalDebt', 0)
+    # Protecție dacă datele sunt None
+    if cash is None: cash = 0
+    if debt is None: debt = 0
+    
     if cash > debt:
         score += 20
         reasons.append("Bilanț Fortăreață (Cash > Datorii)")
@@ -75,28 +84,33 @@ def calculate_prime_score(info, history):
     return score, reasons
 
 def get_news_sentiment(stock):
-    news = stock.news
-    if not news:
-        return "Neutru", []
-    
-    headlines = [n['title'] for n in news[:5]]
-    # Analiză rudimentară de sentiment pe baza cuvintelor cheie
-    positive_keywords = ['beat', 'rise', 'jump', 'high', 'buy', 'growth', 'up', 'record', 'strong']
-    negative_keywords = ['miss', 'fall', 'drop', 'low', 'sell', 'weak', 'down', 'loss', 'crash']
-    
-    score = 0
-    for h in headlines:
-        h_lower = h.lower()
-        if any(k in h_lower for k in positive_keywords):
-            score += 1
-        if any(k in h_lower for k in negative_keywords):
-            score -= 1
-            
-    if score > 0: return "Pozitiv 🟢", headlines
-    elif score < 0: return "Negativ 🔴", headlines
-    else: return "Neutru ⚪", headlines
+    try:
+        news = stock.news
+        if not news:
+            return "Neutru", []
+        
+        # FIX: Folosim .get() pentru a evita KeyError dacă 'title' lipsește
+        headlines = [n.get('title', 'Stire fara titlu') for n in news[:5]]
+        
+        # Analiză rudimentară de sentiment pe baza cuvintelor cheie
+        positive_keywords = ['beat', 'rise', 'jump', 'high', 'buy', 'growth', 'up', 'record', 'strong', 'surge']
+        negative_keywords = ['miss', 'fall', 'drop', 'low', 'sell', 'weak', 'down', 'loss', 'crash', 'plunge']
+        
+        score = 0
+        for h in headlines:
+            h_lower = h.lower()
+            if any(k in h_lower for k in positive_keywords):
+                score += 1
+            if any(k in h_lower for k in negative_keywords):
+                score -= 1
+                
+        if score > 0: return "Pozitiv 🟢", headlines
+        elif score < 0: return "Negativ 🔴", headlines
+        else: return "Neutru ⚪", headlines
+    except Exception as e:
+        return "Indisponibil", [f"Eroare la preluarea știrilor: {e}"]
 
-def create_audit_pdf(ticker, current_price, score, reasons, verdict, risk_data, dividend_info):
+def create_audit_pdf(ticker, current_price, score, reasons, verdict, risk_data, info):
     pdf = FPDF()
     pdf.add_page()
     
@@ -118,7 +132,9 @@ def create_audit_pdf(ticker, current_price, score, reasons, verdict, risk_data, 
     pdf.cell(0, 10, "Analiza Factorilor:", ln=True)
     pdf.set_font("Arial", '', 12)
     for reason in reasons:
-        pdf.cell(0, 10, f"- {reason}", ln=True) # Eliminat latin-1 errors prin formatare simplă
+        # Curățăm textul de caractere speciale pentru PDF simplu
+        clean_reason = reason.encode('latin-1', 'ignore').decode('latin-1')
+        pdf.cell(0, 10, f"- {clean_reason}", ln=True)
     
     pdf.ln(10)
     
@@ -161,12 +177,13 @@ else:
     st.sidebar.info("Lista e goală.")
 
 # --- MAIN APP LOGIC ---
-st.title("🛡️ PRIME Terminal v11.0")
+st.title("🛡️ PRIME Terminal v11.1")
 
 # Tab-uri principale
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Analiză", "📰 Știri & Sentiment", "💰 Calculator Dividende", "📋 Audit Economic", "⚔️ Comparatie"])
 
 if ticker_input:
+    # Verificăm dacă utilizatorul a introdus ceva valid
     stock, history, info = get_stock_data(ticker_input)
     
     if stock and not history.empty:
@@ -176,7 +193,12 @@ if ticker_input:
         
         # Calcul Risc
         daily_ret = history['Close'].pct_change().dropna()
-        cagr = ((history['Close'].iloc[-1] / history['Close'].iloc[0]) ** (1/5) - 1) * 100
+        # Calcul CAGR (Compound Annual Growth Rate)
+        if len(history) > 0:
+            cagr = ((history['Close'].iloc[-1] / history['Close'].iloc[0]) ** (1/5) - 1) * 100
+        else:
+            cagr = 0
+            
         volatility = daily_ret.std() * np.sqrt(252) * 100
         max_drawdown = ((history['Close'] / history['Close'].cummax()) - 1).min() * 100
         sharpe = (cagr - 4) / volatility if volatility > 0 else 0
@@ -214,8 +236,11 @@ if ticker_input:
             st.subheader(f"Sentiment Piață: {ticker_input}")
             sentiment, headlines = get_news_sentiment(stock)
             st.markdown(f"### Stare Generală: {sentiment}")
-            for h in headlines:
-                st.markdown(f"- {h}")
+            if headlines:
+                for h in headlines:
+                    st.markdown(f"- {h}")
+            else:
+                st.info("Nu s-au găsit știri recente.")
 
         # --- TAB 3: DIVIDENDE ---
         with tab3:
@@ -248,15 +273,18 @@ if ticker_input:
             
             if st.button("Descarcă Raport PDF"):
                 risk_data = {"cagr": cagr, "volatility": volatility, "drawdown": max_drawdown}
-                pdf_bytes = create_audit_pdf(ticker_input, current_price, score, reasons, verdict, risk_data, info)
-                b64 = base64.b64encode(pdf_bytes).decode()
-                href = f'<a href="data:application/octet-stream;base64,{b64}" download="Audit_{ticker_input}.pdf">📥 Descarcă Auditul {ticker_input}</a>'
-                st.markdown(href, unsafe_allow_html=True)
+                try:
+                    pdf_bytes = create_audit_pdf(ticker_input, current_price, score, reasons, verdict, risk_data, info)
+                    b64 = base64.b64encode(pdf_bytes).decode()
+                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Audit_{ticker_input}.pdf">📥 Descarcă Auditul {ticker_input}</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Eroare la generarea PDF: {e}")
 
     else:
         st.error("Simbol invalid sau date lipsă. Încearcă alt ticker.")
 
-# --- TAB 5: COMPARATIE (NOU!) ---
+# --- TAB 5: COMPARATIE ---
 with tab5:
     st.header("⚔️ Arena Companiilor")
     
@@ -264,7 +292,7 @@ with tab5:
         st.info("Adaugă companii la Favorite (din Sidebar) pentru a le putea compara aici!")
     else:
         # Multiselect pentru a alege ce comparăm
-        comp_tickers = st.multiselect("Alege companiile pentru comparație:", st.session_state.favorites, default=st.session_state.favorites[:2])
+        comp_tickers = st.multiselect("Alege companiile pentru comparație:", st.session_state.favorites, default=st.session_state.favorites[:2] if len(st.session_state.favorites) >=2 else st.session_state.favorites)
         
         if comp_tickers:
             st.write("Se încarcă datele...")
@@ -273,18 +301,20 @@ with tab5:
                 comp_data = yf.download(comp_tickers, period="1y")['Adj Close']
                 
                 # Normalizare: Toate încep de la 0%
-                # Formula: (Pret / Pret_Initial - 1) * 100
-                normalized_data = (comp_data / comp_data.iloc[0] - 1) * 100
-                
-                st.subheader("Performanță Relativă (%) - Ultimul An")
-                st.line_chart(normalized_data)
-                
-                # Tabel cu cifrele finale
-                st.write("#### Randament total în ultimul an:")
-                final_returns = normalized_data.iloc[-1].sort_values(ascending=False)
-                for t, ret in final_returns.items():
-                    color = "green" if ret > 0 else "red"
-                    st.markdown(f"**{t}**: :{color}[{ret:.2f}%]")
+                if not comp_data.empty:
+                    normalized_data = (comp_data / comp_data.iloc[0] - 1) * 100
+                    
+                    st.subheader("Performanță Relativă (%) - Ultimul An")
+                    st.line_chart(normalized_data)
+                    
+                    # Tabel cu cifrele finale
+                    st.write("#### Randament total în ultimul an:")
+                    final_returns = normalized_data.iloc[-1].sort_values(ascending=False)
+                    for t, ret in final_returns.items():
+                        color = "green" if ret > 0 else "red"
+                        st.markdown(f"**{t}**: :{color}[{ret:.2f}%]")
+                else:
+                    st.warning("Nu există date suficiente pentru comparație.")
                     
             except Exception as e:
-                st.error(f"Eroare la preluarea datelor: {e}")
+                st.error(f"Eroare la preluarea datelor pentru comparație: {e}")
