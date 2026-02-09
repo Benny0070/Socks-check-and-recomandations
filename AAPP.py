@@ -8,8 +8,45 @@ from datetime import datetime
 import json
 import os
 
-# --- 1. CONFIGURARE PAGINĂ ---
+# --- 1. CONFIGURARE PAGINĂ (Trebuie să fie prima linie Streamlit) ---
 st.set_page_config(page_title="PRIME Terminal", page_icon="🛡️", layout="wide")
+
+# --- 2. SISTEM DE SECURITATE (LOGIN) ---
+def check_password():
+    """Returnează True dacă utilizatorul are parola corectă."""
+    
+    # Dacă utilizatorul e deja logat, îl lăsăm să treacă
+    if st.session_state.get('password_correct', False):
+        return True
+
+    # Titlu și câmp de parolă
+    st.markdown("## 🔒 Acces Restricționat")
+    st.write("Te rog introdu parola pentru a accesa terminalul.")
+    
+    password_input = st.text_input("Parola", type="password")
+    
+    if st.button("Log In"):
+        # Aici citim parola pe care ai scris-o tu în SECRETS pe site
+        # "PASSWORD" trebuie să fie exact cum ai scris în căsuța din setări
+        secret_pass = st.secrets.get("PASSWORD", "admin") 
+        
+        if password_input == secret_pass:
+            st.session_state['password_correct'] = True
+            st.success("Parolă corectă!")
+            st.rerun() # Reîncărcăm pagina ca să dispară login-ul
+        else:
+            st.error("😕 Parolă greșită.")
+
+    return False
+
+# VERIFICAREA: Dacă parola nu e bună, OPRIM totul aici.
+if not check_password():
+    st.stop()
+
+# =========================================================
+# DACA AJUNGEM AICI, INSEAMNA CA PAROLA E CORECTA
+# APLICATIA NORMALA INCEPE MAI JOS
+# =========================================================
 
 # --- CSS ---
 st.markdown("""
@@ -212,7 +249,7 @@ def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk,
     pdf.multi_cell(0, 5, "DISCLAIMER: Generat automat. Nu este sfat financiar.")
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
-# --- SIDEBAR CU PAROLA ADMIN ---
+# --- SIDEBAR ---
 st.sidebar.title(f"🔍 {st.session_state.active_ticker}")
 st.sidebar.write("Căutare Nouă:")
 
@@ -228,51 +265,40 @@ with st.sidebar.form(key='search_form'):
 
 st.sidebar.markdown("---")
 
-# 1. CEREM PAROLA
-admin_pass = st.sidebar.text_input("🔐 Parola Admin (pt editare)", type="password")
-IS_ADMIN = (admin_pass == "nigger") # <--- AICI MODIFICI PAROLA TA
-
-# 2. BUTONUL "ADAUGA" APARE DOAR DACA ESTI ADMIN
-if IS_ADMIN:
-    if st.sidebar.button("➕ Salvează la Favorite"):
-        ticker_to_add = st.session_state.active_ticker
-        if ticker_to_add not in st.session_state.favorites:
-            try:
-                t_info = yf.Ticker(ticker_to_add).info
-                long_name = t_info.get('longName', ticker_to_add)
-                st.session_state.favorites.append(ticker_to_add)
-                st.session_state.favorite_names[ticker_to_add] = long_name
-                save_db(st.session_state.favorites, st.session_state.favorite_names)
-                st.sidebar.success("Salvat!")
-                st.rerun()
-            except Exception: st.sidebar.error("Eroare!")
-elif not IS_ADMIN and st.session_state.active_ticker not in st.session_state.favorites:
-    st.sidebar.info("🔒 Loghează-te pentru a salva.")
+if st.sidebar.button("➕ Salvează la Favorite"):
+    ticker_to_add = st.session_state.active_ticker
+    if ticker_to_add not in st.session_state.favorites:
+        try:
+            t_info = yf.Ticker(ticker_to_add).info
+            long_name = t_info.get('longName', ticker_to_add)
+            st.session_state.favorites.append(ticker_to_add)
+            st.session_state.favorite_names[ticker_to_add] = long_name
+            save_db(st.session_state.favorites, st.session_state.favorite_names)
+            st.sidebar.success("Salvat!")
+            st.rerun()
+        except Exception: st.sidebar.error("Eroare!")
 
 st.sidebar.subheader("Lista Mea")
 if st.session_state.favorites:
     for fav in st.session_state.favorites:
         full_n = st.session_state.favorite_names.get(fav, fav)
-        
-        # Daca e admin, aratam si butonul de stergere (X)
-        if IS_ADMIN:
-            c1, c2 = st.sidebar.columns([4, 1])
-        else:
-            c1 = st.sidebar # Daca nu e admin, folosim toata latimea pt nume
+        c1, c2 = st.sidebar.columns([4, 1])
         
         def set_fav(f=fav): st.session_state.active_ticker = f
         def del_fav(f=fav): 
             st.session_state.favorites.remove(f)
             save_db(st.session_state.favorites, st.session_state.favorite_names)
 
-        # Butonul cu numele companiei (vizibil pt toata lumea)
-        if IS_ADMIN:
-            c1.button(f"{fav}", key=f"btn_{fav}", on_click=set_fav, help=full_n)
-            c2.button("X", key=f"del_{fav}", on_click=del_fav) # Doar adminul sterge
-        else:
-            st.sidebar.button(f"{fav}", key=f"btn_{fav}", on_click=set_fav, help=full_n)
+        c1.button(f"{fav}", key=f"btn_{fav}", on_click=set_fav, help=full_n)
+        c2.button("X", key=f"del_{fav}", on_click=del_fav)
 else:
     st.sidebar.info("Nicio companie salvată.")
+    
+# Buton de Logout
+st.sidebar.markdown("---")
+if st.sidebar.button("🔒 Logout"):
+    st.session_state['password_correct'] = False
+    st.rerun()
 
 # --- MAIN APP ---
 temp_stock = yf.Ticker(st.session_state.active_ticker)
