@@ -389,7 +389,7 @@ if stock and not history.empty:
             lunar = (inv * dy) / 12
             anual = inv * dy
             
-            st.success(f"💰 Dacă investești ${inv}, "primești aprox:" ${lunar:.2f} / lună (${anual:.2f} / an)")
+            st.success(f"💰 Dacă investești ${inv},  primești aprox:  ${lunar:.2f} / lună  (Total: ${anual:.2f} / an)")
         else:
             st.info("Această companie nu plătește dividende (sau nu avem date).")
 
