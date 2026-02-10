@@ -377,28 +377,33 @@ if stock and not history.empty:
         st.write(f"Sentiment: **{s}**")
         for h in heads: st.markdown(f"- {h}")
 
-with tab5:
-    dy = info.get('dividendYield', 0) or 0
-    st.metric("Randament Dividend", f"{dy*100:.2f}%")
-    
-    if dy > 0:
-        # Aici am pus min_value=1.0 (ca să nu poți băga 0 sau minus)
-        # și value=100.0 (suma care apare scrisă când deschizi pagina)
-        inv = st.number_input("Investiție Simulată ($)", min_value=1.0, value=100.0, step=10.0)
+# --- TAB 5: DIVIDENDE ---
+    with tab5:
+        dy = info.get('dividendYield', 0) or 0
+        st.metric("Randament Dividend", f"{dy*100:.2f}%")
         
-        lunar = (inv * dy) / 12
-        anual = inv * dy
-        
-        st.success(f"💰 Dacă investești ${inv}, primești aprox: ${lunar:.2f} / lună (${anual:.2f} / an)")
-    else:
-        st.info("Această companie nu plătește dividende (sau nu avem date).")
+        if dy > 0:
+            # Aici am pus min_value=1.0 (ca să nu poți băga 0 sau minus)
+            inv = st.number_input("Investiție Simulată ($)", min_value=1.0, value=100.0, step=10.0)
+            
+            lunar = (inv * dy) / 12
+            anual = inv * dy
+            
+            st.success(f"💰 Dacă investești ${inv}, primești aprox: ${lunar:.2f} / lună (${anual:.2f} / an)")
+        else:
+            st.info("Această companie nu plătește dividende (sau nu avem date).")
 
+    # --- TAB 6: RAPORT (Acum este aliniat corect SUB tab5, nu în el) ---
     with tab6:
         st.write("Genereaza un raport complet.")
         if st.button("📄 Descarca Raport Complet"):
             try:
                 curr_rsi = calculate_rsi(history['Close']).iloc[-1]
                 risk_data = {'vol': volatility, 'dd': max_dd}
+                
+                # Asigură-te că ai importat base64 la începutul fișierului
+                import base64 
+                
                 pdf_bytes = create_extended_pdf(
                     ticker=st.session_state.active_ticker,
                     full_name=temp_name,
@@ -413,17 +418,27 @@ with tab5:
                 b64 = base64.b64encode(pdf_bytes).decode()
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="Raport_Audit_{st.session_state.active_ticker}.pdf">📥 Descarca PDF</a>'
                 st.markdown(href, unsafe_allow_html=True)
-            except Exception as e: st.error(f"Eroare generare PDF: {str(e)}")
+            except Exception as e: 
+                st.error(f"Eroare generare PDF: {str(e)}")
 
+    # --- TAB 7: FAVORITE (Aliniat corect) ---
     with tab7:
         if len(st.session_state.favorites) >= 2:
             sel = st.multiselect("Alege:", st.session_state.favorites, default=st.session_state.favorites[:2])
             if sel:
                 df = pd.DataFrame()
                 for t in sel:
-                    h = yf.Ticker(t).history(period="1y")['Close']
-                    if not h.empty: df[t] = (h/h.iloc[0]-1)*100
+                    # Folosim un try-except și aici pentru siguranță
+                    try:
+                        h = yf.Ticker(t).history(period="1y")['Close']
+                        if not h.empty: 
+                            df[t] = (h/h.iloc[0]-1)*100
+                    except:
+                        pass
                 st.line_chart(df)
-        else: st.info("Adauga 2 favorite pt comparatie.")
+        else: 
+            st.info("Adauga minim 2 favorite pt comparație.")
+
+# --- FINAL ELSE (Acesta trebuie să fie aliniat cu IF-ul principal de la începutul codului tău) ---
 else:
     st.error(f"Nu am găsit date pentru {st.session_state.active_ticker}. Verifică simbolul.")
