@@ -377,12 +377,21 @@ if stock and not history.empty:
         st.write(f"Sentiment: **{s}**")
         for h in heads: st.markdown(f"- {h}")
 
-    with tab5:
-        dy = info.get('dividendYield', 0) or 0
-        st.metric("Randament", f"{dy*100:.2f}%")
-        if dy > 0:
-            inv = st.number_input("Investitie ($)", 1000.0)
-            st.success(f"Lunar: ${(inv*dy)/12:.2f}")
+with tab5:
+    dy = info.get('dividendYield', 0) or 0
+    st.metric("Randament Dividend", f"{dy*100:.2f}%")
+    
+    if dy > 0:
+        # Aici am pus min_value=1.0 (ca să nu poți băga 0 sau minus)
+        # și value=100.0 (suma care apare scrisă când deschizi pagina)
+        inv = st.number_input("Investiție Simulată ($)", min_value=1.0, value=100.0, step=10.0)
+        
+        lunar = (inv * dy) / 12
+        anual = inv * dy
+        
+        st.success(f"💰 Dacă investești ${inv}, primești aprox: ${lunar:.2f} / lună (${anual:.2f} / an)")
+    else:
+        st.info("Această companie nu plătește dividende (sau nu avem date).")
 
     with tab6:
         st.write("Genereaza un raport complet.")
