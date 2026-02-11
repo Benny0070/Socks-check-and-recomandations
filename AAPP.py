@@ -97,12 +97,30 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- FUNCȚIA FĂRĂ CACHE (MODIFICATĂ) ---
-def get_stock_data(ticker, period="5y"):
+# --- FUNCȚIA REPARATĂ (CU PROTECȚIE 60 SECUNDE) ---
+@st.cache_data(ttl=60, show_spinner=False)
+def download_safe_data(ticker, period):
+    # Această parte descarcă datele grele și le ține minte 60 secunde
     try:
+        temp_stock = yf.Ticker(ticker)
+        h = temp_stock.history(period=period)
+        i = temp_stock.info
+        return h, i
+    except:
+        return None, None
+
+def get_stock_data(ticker, period="5y"):
+    # Aceasta este funcția principală care leagă totul
+    try:
+        # 1. Recreăm obiectul rapid (pentru știri/calendar)
         stock = yf.Ticker(ticker)
-        history = stock.history(period=period)
-        info = stock.info
+        
+        # 2. Luăm datele grele din "seif" (cache) sau le descărcăm dacă au trecut 60s
+        history, info = download_safe_data(ticker, period)
+        
+        if history is None or history.empty:
+            return None, None, None
+            
         return stock, history, info
     except:
         return None, None, None
