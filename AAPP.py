@@ -216,69 +216,189 @@ def get_news_sentiment(stock):
     except:
         return "Indisponibil", []
 
+# --- FUNCȚIE NOUĂ DE CURĂȚARE TEXT (Evită erorile de font) ---
+def clean_text_for_pdf(text):
+    """Transformă diacriticele în caractere simple pentru a nu crăpa PDF-ul."""
+    if text is None: return ""
+    text = str(text)
+    replacements = {
+        'ă': 'a', 'â': 'a', 'î': 'i', 'ș': 's', 'ț': 't',
+        'Ă': 'A', 'Â': 'A', 'Î': 'I', 'Ș': 'S', 'Ț': 'T',
+        '🔴': '[RISC]', '🟢': '[BUN]', '🟡': '[NEUTRU]', '⚪': '-',
+        '💎': '[GEM]', '🛡️': '[SCUT]', '📈': '[UP]', '📉': '[DOWN]'
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    
+    # Eliminăm orice alt caracter ciudat care nu e latin-1
+    return text.encode('latin-1', 'ignore').decode('latin-1')
+
+# --- GENERATORUL DE RAPORT COMPLEX ---
 def create_extended_pdf(ticker, full_name, price, score, reasons, verdict, risk, info, rsi_val):
     pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # --- PAGINA 1: REZUMAT ---
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 20)
-    pdf.cell(0, 15, f"RAPORT DE AUDIT: {ticker}", ln=True, align='C')
+    
+    # Titlu
+    pdf.set_font("Arial", 'B', 24)
+    pdf.cell(0, 20, f"RAPORT DE ANALIZA: {clean_text_for_pdf(ticker)}", ln=True, align='C')
+    
     pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 10, f"Generat la: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
-    pdf.ln(5)
+    pdf.cell(0, 10, f"Generat automat de PRIME Terminal | Data: {datetime.now().strftime('%Y-%m-%d')}", ln=True, align='C')
+    pdf.ln(10)
 
-    pdf.set_fill_color(230, 230, 230)
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "1. REZUMAT EXECUTIV", ln=True, fill=True)
-    pdf.ln(2)
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(50, 10, f"Companie: {clean_text_for_pdf(full_name)}", ln=True)
-    pdf.cell(50, 10, f"Pret Curent: ${price:.2f}", ln=True)
-    pdf.cell(50, 10, f"Scor PRIME: {score}/100", ln=True)
-    pdf.cell(50, 10, f"Verdict: {clean_text_for_pdf(verdict)}", ln=True)
-    
+    # 1. SCOR ȘI VERDICT
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 12, "1. VERDICT GENERAL", ln=True, fill=True)
     pdf.ln(5)
+    
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "2. PROFIL DE RISC", ln=True, fill=True)
-    pdf.ln(2)
+    pdf.cell(50, 10, f"SCOR PRIME: {score}/100", ln=False)
+    pdf.cell(0, 10, f"CALIFICATIV: {clean_text_for_pdf(verdict)}", ln=True)
+    
     pdf.set_font("Arial", '', 11)
-    
-    pdf.cell(63, 8, f"Volatilitate: {risk['vol']:.1f}%", border=1)
-    pdf.cell(63, 8, f"Max Drawdown: {risk['dd']:.1f}%", border=1)
-    pdf.cell(63, 8, f"Sharpe Ratio: {risk.get('sharpe', 0):.2f}", border=1, ln=True)
-    
     pdf.ln(5)
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "3. INDICATORI FUNDAMENTALI", ln=True, fill=True)
-    pdf.ln(2)
-    def get_fmt(key, is_perc=False):
-        val = info.get(key)
-        if val is None: return "N/A"
-        if is_perc: return f"{val*100:.2f}%"
-        return f"{val:.2f}"
-    
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 8, "A. Evaluare", ln=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(63, 8, f"P/E Ratio: {get_fmt('trailingPE')}", border=1)
-    pdf.cell(63, 8, f"ROE: {get_fmt('returnOnEquity', True)}", border=1)
-    pdf.cell(63, 8, f"PEG Ratio: {get_fmt('pegRatio')}", border=1, ln=True)
-
-    pdf.ln(2)
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 8, "B. Profitabilitate & Cash", ln=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(63, 8, f"Marja Profit: {get_fmt('profitMargins', True)}", border=1)
-    pdf.cell(63, 8, f"FCF: {info.get('freeCashflow', 0)/1e9:.1f}B", border=1)
-    pdf.cell(63, 8, f"Crestere Venit: {get_fmt('revenueGrowth', True)}", border=1, ln=True)
-
-    pdf.ln(5)
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "4. MOTIVE SCOR", ln=True, fill=True)
-    pdf.set_font("Arial", '', 11)
-    for r in reasons: pdf.cell(0, 8, f" -> {clean_text_for_pdf(r)}", ln=True)
+    pdf.multi_cell(0, 6, clean_text_for_pdf(
+        f"Compania {full_name} se tranzactioneaza la pretul de ${price:.2f}. "
+        f"Pe baza algoritmului nostru, aceasta prezinta un profil de risc cu volatilitate anuala de {risk['vol']:.1f}% "
+        f"si un Sharpe Ratio de {risk.get('sharpe', 0):.2f} (un numar mai mare de 1 indica un randament bun ajustat la risc)."
+    ))
 
     pdf.ln(10)
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, "PUNCTE CHEIE (PRO/CONTRA)", ln=True)
+    pdf.set_font("Arial", '', 11)
+    
+    if reasons:
+        for r in reasons:
+            pdf.cell(5, 8, "-", ln=False)
+            pdf.multi_cell(0, 8, clean_text_for_pdf(r))
+    else:
+        pdf.cell(0, 8, "Nu au fost identificate semnale majore automate.", ln=True)
+
+    # --- PAGINA 2: ANALIZA FUNDAMENTALĂ DETALIATĂ ---
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 12, "2. ANALIZA FUNDAMENTALA DETALIATA", ln=True, fill=True)
+    pdf.ln(5)
+
+    # A. EVALUARE (VALUATION)
+    pe = info.get('trailingPE')
+    peg = info.get('pegRatio')
+    pb = info.get('priceToBook')
+    
+    # Interpretare Textuala Evaluare
+    interp_val = "Date insuficiente."
+    if pe:
+        if pe < 15: interp_val = "Compania este considerata ieftina (Sub-evaluata)."
+        elif pe < 30: interp_val = "Evaluarea este corecta (Fair Value)."
+        else: interp_val = "Pretul include asteptari mari de crestere (Supra-evaluata)."
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, f"A. Evaluare (Cat platesti?): {clean_text_for_pdf(interp_val)}", ln=True)
+    pdf.set_font("Arial", '', 11)
+    
+    col_w = 60
+    pdf.cell(col_w, 8, f"P/E Ratio: {pe if pe else 'N/A'}", border=1)
+    pdf.cell(col_w, 8, f"PEG Ratio: {peg if peg else 'N/A'}", border=1)
+    pdf.cell(col_w, 8, f"P/Book: {pb if pb else 'N/A'}", border=1, ln=True)
+    pdf.ln(5)
+
+    # B. PROFITABILITATE
+    mg = info.get('profitMargins', 0)
+    roe = info.get('returnOnEquity', 0)
+    
+    # Interpretare Textuala Profit
+    interp_prof = "Compania are probleme de profitabilitate."
+    if mg > 0.15: interp_prof = "Compania este o masina de bani (Marje foarte bune)."
+    elif mg > 0.05: interp_prof = "Profitabilitate stabila si normala."
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, f"B. Profitabilitate: {clean_text_for_pdf(interp_prof)}", ln=True)
+    pdf.set_font("Arial", '', 11)
+    
+    pdf.cell(col_w, 8, f"Marja Profit: {mg*100:.1f}%", border=1)
+    pdf.cell(col_w, 8, f"ROE (Randament): {roe*100:.1f}%", border=1)
+    pdf.cell(col_w, 8, f"Revenue Growth: {info.get('revenueGrowth', 0)*100:.1f}%", border=1, ln=True)
+    pdf.ln(5)
+
+    # C. BILANT SI DATORII
+    cash = info.get('totalCash', 0)
+    debt = info.get('totalDebt', 0)
+    current_ratio = info.get('currentRatio', 0)
+    
+    interp_health = "Situatie financiara riscanta."
+    if cash > debt: interp_health = "Bilant FORTAREATA (Mai multi bani decat datorii)."
+    elif current_ratio > 1.5: interp_health = "Stabilitate buna pe termen scurt."
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, f"C. Sanatate Financiara: {clean_text_for_pdf(interp_health)}", ln=True)
+    pdf.set_font("Arial", '', 11)
+    
+    pdf.cell(col_w, 8, f"Cash Total: ${cash/1e9:.1f}B", border=1)
+    pdf.cell(col_w, 8, f"Datorie Totala: ${debt/1e9:.1f}B", border=1)
+    pdf.cell(col_w, 8, f"Lichiditate (Curr): {current_ratio:.2f}", border=1, ln=True)
+
+    # --- PAGINA 3: TEHNIC, DIVIDENDE SI DISCLAIMER ---
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 12, "3. ANALIZA TEHNICA & DIVIDENDE", ln=True, fill=True)
+    pdf.ln(5)
+
+    # RSI
+    interp_rsi = "Momentum Neutru."
+    if rsi_val > 70: interp_rsi = "Supra-cumparat (Posibila corectie)."
+    elif rsi_val < 30: interp_rsi = "Supra-vandut (Posibila revenire)."
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, f"Indicator RSI (14 zile): {rsi_val:.2f} -> {clean_text_for_pdf(interp_rsi)}", ln=True)
+    
+    # Dividende
+    div_yield = info.get('dividendYield', 0)
+    if div_yield and div_yield < 1: div_yield = div_yield * 100 # Corectie
+    
+    pdf.ln(5)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "Politica de Dividende:", ln=True)
+    pdf.set_font("Arial", '', 11)
+    if div_yield and div_yield > 0:
+        pdf.multi_cell(0, 6, clean_text_for_pdf(
+            f"Compania plateste dividende. Randamentul anual curent este de {div_yield:.2f}%. "
+            f"Rata de plata (Payout Ratio) este de {info.get('payoutRatio', 0)*100:.1f}%, ceea ce indica cat din profit se intoarce la investitori."
+        ))
+    else:
+        pdf.multi_cell(0, 6, "Compania NU plateste dividende in prezent. Profitul este reinvestit.")
+
+    # TABEL DATE BRUTE SUPLIMENTARE
+    pdf.ln(10)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "Alte Date Relevante (Snapshot):", ln=True)
+    pdf.set_font("Arial", '', 10)
+    
+    extra_data = [
+        ("Sector", info.get('sector', 'N/A')),
+        ("Industrie", info.get('industry', 'N/A')),
+        ("Angajati", info.get('fullTimeEmployees', 'N/A')),
+        ("Target Pret Analisti", f"${info.get('targetMeanPrice', 'N/A')}"),
+        ("Beta (Volatilitate vs Piata)", f"{info.get('beta', 'N/A')}")
+    ]
+    
+    for label, val in extra_data:
+        pdf.cell(60, 6, clean_text_for_pdf(label), border=1)
+        pdf.cell(0, 6, clean_text_for_pdf(str(val)), border=1, ln=True)
+
+    # DISCLAIMER FINAL
+    pdf.ln(20)
     pdf.set_font("Arial", 'I', 8)
-    pdf.multi_cell(0, 5, "DISCLAIMER: Generat automat. Nu este sfat financiar.")
+    pdf.multi_cell(0, 5, clean_text_for_pdf(
+        "DISCLAIMER: Acest raport este generat automat de un algoritm software si are scop pur informativ. "
+        "Nu reprezinta un sfat financiar, juridic sau fiscal. Performantele trecute nu garanteaza rezultate viitoare. "
+        "Consultati un specialist inainte de a investi."
+    ))
+
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
 # --- SIDEBAR (SEARCH) ---
