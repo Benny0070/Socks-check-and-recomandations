@@ -595,7 +595,7 @@ if stock and not history.empty:
             st.subheader("🧮 Calculator Venit Pasiv")
             st.write("Câți bani vrei să investești?")
             
-            inv = st.number_input("Suma Investită ($)", min_value=100.0, value=1000.0, step=100.0, key="inv_calc")
+            inv = st.number_input("Suma Investită ($)", min_value=1.0, value=1000.0, step=100.0, key="inv_calc")
             
             # Calcul matematic: (Suma * Procent) / 100
             venit_anual = inv * (final_yield / 100)
