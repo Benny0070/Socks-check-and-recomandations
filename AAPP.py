@@ -8,7 +8,9 @@ from datetime import datetime
 import json
 import os
 import plotly.graph_objects as go 
-import requests # <--- AM IMPORTAT REQUESTS PENTRU A EVITA BLOCAREA
+import requests
+import random
+import time
 
 # --- 1. CONFIGURARE PAGINĂ ---
 st.set_page_config(page_title="PRIME Terminal", page_icon="🛡️", layout="wide")
@@ -27,6 +29,7 @@ def check_access_password():
     password_input = st.text_input("Parola Acces", type="password", key="login_pass")
     
     if st.button("Intră în Aplicație"):
+        # Dacă nu există secret setat, parola e 1234
         secret_access = st.secrets.get("ACCESS_PASSWORD", "1234") 
         
         if password_input == secret_access:
@@ -84,12 +87,7 @@ if 'db_loaded' not in st.session_state:
 if 'active_ticker' not in st.session_state: 
     st.session_state.active_ticker = "NVDA"
 
-# --- FUNCȚII UTILITARE & CALCUL ---
-
-def clean_text_for_pdf(text):
-    text = str(text)
-    text = text.replace("🔴", "[RISC]").replace("🟢", "[BUN]").replace("🟡", "[NEUTRU]").replace("⚪", "-")
-    return text.encode('latin-1', 'ignore').decode('latin-1')
+# --- FUNCȚII UTILITARE ---
 
 def calculate_rsi(data, window=14):
     delta = data.diff()
@@ -100,42 +98,62 @@ def calculate_rsi(data, window=14):
 
 # --- FIX PENTRU RATE LIMIT (Blocare Yahoo) ---
 def get_custom_session():
-    """Creează o sesiune falsă de browser pentru a evita eroarea 403/429."""
+    """Generează o sesiune cu identitate aleatorie pentru a păcăli filtrele."""
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0'
+    ]
+    
     session = requests.Session()
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': random.choice(user_agents),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
     })
     return session
 
-# --- FUNCȚIA DE DESCĂRCARE (Cu Sesiune Custom) ---
+# --- FUNCȚIA DE DESCĂRCARE CU RETRY ---
 @st.cache_data(ttl=60, show_spinner=False)
 def download_safe_data(ticker, period):
-    try:
-        # Folosim sesiunea custom pentru a păcăli Yahoo
-        session = get_custom_session()
-        temp_stock = yf.Ticker(ticker, session=session)
-        
-        h = temp_stock.history(period=period)
-        
-        # Dacă history e gol, forțăm o eroare ca să mergem la except
-        if h.empty:
-            return None, None
+    # Încercăm de 3 ori (Retry logic)
+    for i in range(3):
+        try:
+            session = get_custom_session()
+            temp_stock = yf.Ticker(ticker, session=session)
             
-        i = temp_stock.info
-        return h, i
-    except Exception as e:
-        # Putem printa eroarea în consolă pentru tine, dar nu o afișăm utilizatorului
-        print(f"Eroare download: {e}")
-        return None, None
+            # 1. Încercăm să luăm istoricul
+            h = temp_stock.history(period=period)
+            
+            # Dacă istoricul e gol, ceva nu e bine, mai încercăm o dată
+            if h.empty:
+                time.sleep(1 + i) # Pauză progresivă
+                continue
+                
+            # 2. Încercăm să luăm INFO
+            try:
+                info = temp_stock.info
+            except:
+                info = {} # Continuăm doar cu graficul
+            
+            return h, info
+
+        except Exception as e:
+            time.sleep(1)
+            continue
+            
+    # Dacă a eșuat de 3 ori
+    return None, None
 
 def get_stock_data(ticker, period="5y"):
-    # Aceasta este funcția principală care leagă totul
     try:
-        # 1. Folosim sesiunea și aici
+        # Folosim sesiunea și aici pentru obiectul principal
         session = get_custom_session()
         stock = yf.Ticker(ticker, session=session)
         
-        # 2. Luăm datele grele din "seif" (cache)
+        # Luăm datele grele din cache
         history, info = download_safe_data(ticker, period)
         
         if history is None or history.empty:
@@ -170,6 +188,9 @@ def calculate_prime_score(info, history):
     score = 0
     reasons = []
     
+    # Protecție dacă info e gol
+    if not info: info = {}
+
     # 1. TREND
     if not history.empty:
         if len(history) > 200:
@@ -236,7 +257,7 @@ def get_news_sentiment(stock):
     except:
         return "Indisponibil", []
 
-# --- FUNCȚIE NOUĂ DE CURĂȚARE TEXT (Evită erorile de font) ---
+# --- CURĂȚARE TEXT PENTRU PDF ---
 def clean_text_for_pdf(text):
     """Transformă diacriticele în caractere simple pentru a nu crăpa PDF-ul."""
     if text is None: return ""
@@ -449,7 +470,9 @@ if IS_ADMIN:
         ticker_to_add = st.session_state.active_ticker
         if ticker_to_add not in st.session_state.favorites:
             try:
-                t_info = yf.Ticker(ticker_to_add).info
+                # Facem fetch cu sesiunea sigură
+                sess = get_custom_session()
+                t_info = yf.Ticker(ticker_to_add, session=sess).info
                 long_name = t_info.get('longName', ticker_to_add)
                 st.session_state.favorites.append(ticker_to_add)
                 st.session_state.favorite_names[ticker_to_add] = long_name
@@ -489,9 +512,12 @@ if st.sidebar.button("🔒 Logout Site"):
     st.rerun()
 
 # --- MAIN APP (PUBLIC DUPA ACCES) ---
-temp_stock = yf.Ticker(st.session_state.active_ticker)
-try: temp_name = temp_stock.info.get('longName', st.session_state.active_ticker)
-except: temp_name = st.session_state.active_ticker
+# Pre-incarcare nume
+try: 
+    temp_stock_sess = yf.Ticker(st.session_state.active_ticker, session=get_custom_session())
+    temp_name = temp_stock_sess.info.get('longName', st.session_state.active_ticker)
+except: 
+    temp_name = st.session_state.active_ticker
 
 st.title(f"🛡️ {st.session_state.active_ticker}")
 st.caption(f"{temp_name}")
@@ -505,7 +531,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 
 stock, history, info = get_stock_data(st.session_state.active_ticker, period=perioada)
 
-if stock and not history.empty:
+if stock and history is not None and not history.empty:
     curr_price = history['Close'].iloc[-1]
     
     volatility, max_dd, sharpe = calculate_risk_metrics(history)
@@ -581,8 +607,7 @@ if stock and not history.empty:
         if (div_yield_raw is None or div_yield_raw == 0) and (div_rate and div_rate > 0):
              div_yield_raw = div_rate / curr_price
 
-        # Standardizare: Yahoo dă de obicei 0.05 pentru 5%. Noi vrem procentul (5.0).
-        # Dacă e None, punem 0.
+        # Standardizare
         if div_yield_raw is None: 
             auto_yield = 0.0
         else:
@@ -592,43 +617,36 @@ if stock and not history.empty:
         col_info, col_edit = st.columns([2, 1])
         
         with col_info:
-            # Afișăm ce a găsit sistemul
             st.write(f"Yield detectat automat: **{auto_yield:.2f}%**")
             st.caption(f"Plată anuală (est): ${div_rate if div_rate else 0}")
 
         with col_edit:
-            # Aici e soluția ta: BUTONUL DE MODIFICARE
             override = st.checkbox("✏️ Corectează Manual")
         
         if override:
-            # Dacă bifezi, tu decizi cât e randamentul
             final_yield = st.number_input("Introdu Randamentul Corect (%):", value=float(auto_yield), step=0.1, format="%.2f")
             st.success(f"Folosim randamentul manual: {final_yield}%")
         else:
-            # Dacă nu bifezi, mergem pe mâna robotului
             final_yield = auto_yield
 
         st.markdown("---")
 
-        # 3. CALCULATOR VENIT PASIV (Folosește final_yield)
+        # 3. CALCULATOR VENIT PASIV
         if final_yield > 0:
             st.subheader("🧮 Calculator Venit Pasiv")
             st.write("Câți bani vrei să investești?")
             
             inv = st.number_input("Suma Investită ($)", min_value=1.0, value=1000.0, step=100.0, key="inv_calc")
             
-            # Calcul matematic: (Suma * Procent) / 100
             venit_anual = inv * (final_yield / 100)
             venit_lunar = venit_anual / 12
             
-            # Afișare rezultate
             c1, c2, c3 = st.columns(3)
             c1.metric("Investiție", f"${inv:,.0f}")
             c2.metric("Venit Lunar", f"${venit_lunar:.2f}")
             c3.metric("Venit Anual", f"${venit_anual:.2f}")
             
-            # Proiecție pe 10 ani (fără reinvestire, simplu)
-            st.progress(min(int(final_yield * 2), 100)) # O bară vizuală pentru cât de mare e yield-ul
+            st.progress(min(int(final_yield * 2), 100))
             st.caption(f"La un randament de {final_yield}%, îți recuperezi investiția din dividende în aproximativ {100/final_yield:.1f} ani (fără creșterea prețului).")
             
         else:
@@ -669,7 +687,8 @@ if stock and not history.empty:
                 
                 for t in sel:
                     try:
-                        # FOLOSIM SESIUNEA SI AICI
+                        # Pauză mică pentru a evita rate limit în loop
+                        time.sleep(0.5) 
                         s_tmp = yf.Ticker(t, session=get_custom_session())
                         h = s_tmp.history(period="1y")['Close']
                         i = s_tmp.info
@@ -698,4 +717,4 @@ if stock and not history.empty:
             st.info("Adaugă minim 2 companii la favorite pentru a activa comparația.")
 
 else:
-    st.error(f"Nu am găsit date pentru {st.session_state.active_ticker}. Verifică simbolul sau încearcă mai târziu (Limită Yahoo).")
+    st.error(f"Nu am găsit date pentru {st.session_state.active_ticker}. Sistemul Yahoo e supraîncărcat. Reîncarcă pagina în 1 minut.")
