@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import os
 import plotly.graph_objects as go 
+import requests # <--- AM IMPORTAT REQUESTS PENTRU A EVITA BLOCAREA
 
 # --- 1. CONFIGURARE PAGINĂ ---
 st.set_page_config(page_title="PRIME Terminal", page_icon="🛡️", layout="wide")
@@ -97,33 +98,52 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- FUNCȚIA MODIFICATĂ PENTRU DEPANARE (Fără protecție erori) ---
+# --- FIX PENTRU RATE LIMIT (Blocare Yahoo) ---
+def get_custom_session():
+    """Creează o sesiune falsă de browser pentru a evita eroarea 403/429."""
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    return session
+
+# --- FUNCȚIA DE DESCĂRCARE (Cu Sesiune Custom) ---
 @st.cache_data(ttl=60, show_spinner=False)
 def download_safe_data(ticker, period):
-    # Am scos "try" și "except" ca să vedem de ce nu merge yfinance
-    temp_stock = yf.Ticker(ticker)
-    h = temp_stock.history(period=period)
-    i = temp_stock.info
-    return h, i
+    try:
+        # Folosim sesiunea custom pentru a păcăli Yahoo
+        session = get_custom_session()
+        temp_stock = yf.Ticker(ticker, session=session)
+        
+        h = temp_stock.history(period=period)
+        
+        # Dacă history e gol, forțăm o eroare ca să mergem la except
+        if h.empty:
+            return None, None
+            
+        i = temp_stock.info
+        return h, i
+    except Exception as e:
+        # Putem printa eroarea în consolă pentru tine, dar nu o afișăm utilizatorului
+        print(f"Eroare download: {e}")
+        return None, None
 
 def get_stock_data(ticker, period="5y"):
-    # --- VARIANTA FĂRĂ PROTECȚIE (DEBUG) ---
-    # Aceasta va lăsa aplicația să crape cu eroarea roșie reală,
-    # ca să știm dacă e problemă de internet, de bibliotecă sau de Yahoo.
-    
-    # 1. Creăm obiectul
-    stock = yf.Ticker(ticker)
-    
-    # 2. Descărcăm datele (funcția download_safe_data e deja fără protecție)
-    history, info = download_safe_data(ticker, period)
-    
-    # 3. Verificăm dacă datele sunt goale
-    if history is None or history.empty:
-        # Putem pune un mesaj aici să vedem dacă ajunge până la capăt
-        st.error("DEBUG: History a returnat Gol/None")
-        return None, None, None
+    # Aceasta este funcția principală care leagă totul
+    try:
+        # 1. Folosim sesiunea și aici
+        session = get_custom_session()
+        stock = yf.Ticker(ticker, session=session)
         
-    return stock, history, info
+        # 2. Luăm datele grele din "seif" (cache)
+        history, info = download_safe_data(ticker, period)
+        
+        if history is None or history.empty:
+            return None, None, None
+            
+        return stock, history, info
+    except:
+        return None, None, None
 
 def calculate_risk_metrics(history):
     if history.empty: return 0, 0, 0
@@ -649,7 +669,8 @@ if stock and not history.empty:
                 
                 for t in sel:
                     try:
-                        s_tmp = yf.Ticker(t)
+                        # FOLOSIM SESIUNEA SI AICI
+                        s_tmp = yf.Ticker(t, session=get_custom_session())
                         h = s_tmp.history(period="1y")['Close']
                         i = s_tmp.info
                         
@@ -677,4 +698,4 @@ if stock and not history.empty:
             st.info("Adaugă minim 2 companii la favorite pentru a activa comparația.")
 
 else:
-    st.error(f"Nu am găsit date pentru {st.session_state.active_ticker}. Verifică simbolul.")
+    st.error(f"Nu am găsit date pentru {st.session_state.active_ticker}. Verifică simbolul sau încearcă mai târziu (Limită Yahoo).")
