@@ -3,5 +3,4 @@ pandas
 numpy
 fpdf
 plotly
-yfinance>=0.2.43
-requests
+yfinance>=0.2.44
