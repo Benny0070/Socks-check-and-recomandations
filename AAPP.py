@@ -4,36 +4,12 @@ import pandas as pd
 import numpy as np
 from fpdf import FPDF
 import base64
-from datetime import datetime
-import json
 import os
 import plotly.graph_objects as go 
-import requests
-import random
 import time
 
 # --- 1. CONFIGURARE PAGINĂ ---
 st.set_page_config(page_title="PRIME Terminal", page_icon="🛡️", layout="wide")
-
-# =========================================================
-# SYSTEM: USER AGENT ROTATION (EVITARE BLOCARE YAHOO)
-# =========================================================
-def get_custom_session():
-    """Creează o sesiune care se preface a fi un browser real."""
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0'
-    ]
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': random.choice(user_agents),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-    })
-    return session
 
 # =========================================================
 # NIVEL 1: SECURITATE (LOGIN)
@@ -46,6 +22,7 @@ def check_access_password():
     password_input = st.text_input("Parola Acces", type="password", key="login_pass")
     
     if st.button("Intră în Aplicație"):
+        # Parola default 1234 dacă nu e setată în secrets
         secret_access = st.secrets.get("ACCESS_PASSWORD", "1234") 
         if password_input == secret_access:
             st.session_state['access_granted'] = True
@@ -81,11 +58,14 @@ DB_FILE = "prime_favorites.json"
 def load_db():
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, "r") as f: return json.load(f)
+            with open(DB_FILE, "r") as f: 
+                import json
+                return json.load(f)
         except: pass
     return {"favorites": [], "names": {}}
 
 def save_db(fav_list, fav_names):
+    import json
     with open(DB_FILE, "w") as f:
         json.dump({"favorites": fav_list, "names": fav_names}, f)
 
@@ -121,9 +101,8 @@ def calculate_prime_score(info, history):
     score = 0
     reasons = []
     
-    # Dacă info e gol (eroare Yahoo), returnăm scor neutru
     if not info:
-        return 50, ["Date insuficiente pentru scor complet."]
+        return 50, ["Date insuficiente (Eroare Yahoo)"]
 
     # 1. TREND
     if not history.empty:
@@ -160,37 +139,28 @@ def calculate_prime_score(info, history):
 
     return score, reasons
 
-# --- DATA FETCHING (PARTEA CRITICĂ) ---
-@st.cache_data(ttl=3600, show_spinner=False) # Cache 1 oră
+# --- DATA FETCHING SIMPLIFICAT (FARA SESIUNI CUSTOM) ---
+@st.cache_data(ttl=900, show_spinner=False) # Cache 15 min
 def get_safe_data(ticker, period):
-    session = get_custom_session()
-    stock = yf.Ticker(ticker, session=session)
+    # AICI ERA EROAREA: Am scos 'session=session'
+    # Lăsăm yfinance să se ocupe singur
+    stock = yf.Ticker(ticker)
     
-    # 1. Istoric (Grafic) - Asta merge aproape mereu
     try:
+        # history() este robust
         history = stock.history(period=period)
-    except:
+    except Exception as e:
+        print(f"Eroare istoric: {e}")
         history = pd.DataFrame()
 
-    # 2. Info (Date fundamentale) - Asta pică des
     try:
-        # Pauză mică pentru a nu speria Yahoo
-        time.sleep(0.2)
+        # info() este sensibil, îl izolăm
         info = stock.info
-    except:
-        # Dacă pică, folosim un dicționar gol, ca să nu crape site-ul
+    except Exception as e:
+        print(f"Eroare info: {e}")
         info = {}
     
     return history, info
-
-def get_news_sentiment(stock):
-    try:
-        news = stock.news
-        headlines = [n.get('title', '') for n in news[:5]]
-        if not headlines: return "Indisponibil", []
-        return "Mixt / Analiză Manuală", headlines
-    except:
-        return "Indisponibil", []
 
 # --- PDF GENERATOR ---
 def clean_text_for_pdf(text):
@@ -226,7 +196,6 @@ def create_extended_pdf(ticker, price, score, reasons, verdict, risk, info, rsi_
     pdf.cell(0, 10, "DATE FINANCIARE:", ln=True)
     pdf.set_font("Arial", '', 12)
     
-    # Folosim .get cu valoare default pentru a evita erorile dacă info lipsește
     pe = info.get('trailingPE', 'N/A')
     peg = info.get('pegRatio', 'N/A')
     profit = info.get('profitMargins', 0)
@@ -279,6 +248,7 @@ if st.sidebar.button("Logout"):
 # Main Content
 st.title(f"🛡️ {st.session_state.active_ticker}")
 
+# Apelăm funcția reparată
 history, info = get_safe_data(st.session_state.active_ticker, "1y")
 
 if history is not None and not history.empty:
@@ -301,7 +271,7 @@ if history is not None and not history.empty:
         c4.metric("Sharpe", f"{sharpe:.2f}")
         
         if not info:
-            st.warning("⚠️ Datele fundamentale (P/E, Venituri) nu sunt disponibile momentan de la Yahoo. Graficul este corect.")
+            st.warning("⚠️ Datele fundamentale limitate. Se afișează doar date tehnice.")
         
         fig = go.Figure(data=[go.Candlestick(x=history.index, open=history['Open'], high=history['High'], low=history['Low'], close=history['Close'])])
         fig.update_layout(height=400, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark")
@@ -310,16 +280,13 @@ if history is not None and not history.empty:
     with t2:
         rsi = calculate_rsi(history['Close']).iloc[-1]
         st.metric("RSI (14)", f"{rsi:.2f}")
-        st.caption("RSI > 70: Scump | RSI < 30: Ieftin")
 
     with t3:
         st.subheader("Calculator Dividende")
-        # Fallback dacă info e gol
         div_yield = info.get('dividendYield', 0) if info else 0
         if div_yield is None: div_yield = 0
         
         st.write(f"Randament anual estimat: **{div_yield*100:.2f}%**")
-        
         suma = st.number_input("Investiție ($)", value=1000)
         venit = suma * div_yield
         st.success(f"Venit Pasiv Anual: ${venit:.2f}")
@@ -340,22 +307,17 @@ if history is not None and not history.empty:
 
     with t5:
         if len(st.session_state.favorites) >= 2:
-            st.subheader("Comparație Performanță (1 An)")
+            st.subheader("Comparație Performanță")
             sel = st.multiselect("Companii", st.session_state.favorites, default=st.session_state.favorites[:2])
             if sel:
                 df_chart = pd.DataFrame()
                 for s in sel:
-                    # Fetching rapid pentru grafic
                     try:
                         h_tmp, _ = get_safe_data(s, "1y")
                         if not h_tmp.empty:
-                            # Normalizare la procent
                             df_chart[s] = (h_tmp['Close'] / h_tmp['Close'].iloc[0] - 1) * 100
                     except: pass
                 st.line_chart(df_chart)
-        else:
-            st.info("Adaugă minim 2 companii la favorite.")
 
 else:
-    st.error(f"Nu s-au putut încărca date pentru {st.session_state.active_ticker}. Yahoo a blocat temporar conexiunea sau simbolul este greșit.")
-    st.info("Încearcă din nou în 2 minute.")
+    st.error(f"Nu s-au putut încărca date pentru {st.session_state.active_ticker}.")
