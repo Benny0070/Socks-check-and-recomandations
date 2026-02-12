@@ -97,17 +97,14 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- FUNCȚIA REPARATĂ (CU PROTECȚIE 60 SECUNDE) ---
+# --- FUNCȚIA MODIFICATĂ PENTRU DEPANARE (Fără protecție erori) ---
 @st.cache_data(ttl=60, show_spinner=False)
 def download_safe_data(ticker, period):
-    # Această parte descarcă datele grele și le ține minte 60 secunde
-    try:
-        temp_stock = yf.Ticker(ticker)
-        h = temp_stock.history(period=period)
-        i = temp_stock.info
-        return h, i
-    except:
-        return None, None
+    # Am scos "try" și "except" ca să vedem de ce nu merge yfinance
+    temp_stock = yf.Ticker(ticker)
+    h = temp_stock.history(period=period)
+    i = temp_stock.info
+    return h, i
 
 def get_stock_data(ticker, period="5y"):
     # Aceasta este funcția principală care leagă totul
